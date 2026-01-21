@@ -1,0 +1,48 @@
+version: 3
+
+dotenv: ['.env']
+
+vars:
+  MAIN: ./cmd/app
+  MIGRATIONS_DIR: migrations
+  DATABASE_URL: "{{.POSTGRES_DSN | default .ENV.POSTGRES_DSN}}"
+
+tasks:
+  run: 
+    desc: "Запуск Api локально"
+    cmds: 
+      - go run {{.MAIN}}
+  
+  tidy:
+    desc: Синхронизация зависимостей
+    cmds:
+      # ⚙️ Удаляем docs перед tidy, чтобы избежать ошибки на CI
+      - rm -rf {{.SWAG_DIR}} || true
+      - go mod tidy
+      - go mod verify
+
+  # === 🧩 MIGRATIONS (goose) ===
+  migrate:up:
+    desc: Применить все миграции
+    cmds:
+      - goose -dir {{.MIGRATIONS_DIR}} postgres "{{.DATABASE_URL}}" up
+
+  migrate:down:
+    desc: Откатить последнюю миграцию
+    cmds:
+      - goose -dir {{.MIGRATIONS_DIR}} postgres "{{.DATABASE_URL}}" down
+
+  migrate:redo:
+    desc: Повторить последнюю миграцию
+    cmds:
+      - goose -dir {{.MIGRATIONS_DIR}} postgres "{{.DATABASE_URL}}" redo
+
+  migrate:status:
+    desc: Показать статус миграций
+    cmds:
+      - goose -dir {{.MIGRATIONS_DIR}} postgres "{{.DATABASE_URL}}" status
+
+  migrate:create:
+    desc: Создать новую миграцию. Пример task migrate:create name=create_users_table
+    cmds:
+      - goose -dir migrations create {{.name}} sql
