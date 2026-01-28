@@ -1,6 +1,7 @@
 package main
 
 import (
+	"Flatly/internal/user"
 	"context"
 	"fmt"
 	"log"
@@ -12,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
+	"go.uber.org/zap"
 )
 
 func main() {
@@ -53,21 +55,17 @@ func main() {
 
 	log.Printf("PostgreSQL подключён (max: %d, min: %d)", pool.Config().MaxConns, pool.Config().MinConns)
 
+	logger, _ := zap.NewProduction()
+	defer logger.Sync()
+
+	repo := user.NewPgRepository(pool, logger)
+	service := user.NewService(repo, logger)
+	handler := user.NewHTTPHandler(service, logger)
+
 	// 4. Создаём роутер (пример с chi)
 	r := chi.NewRouter()
 
-	// Пример простого health-check
-	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-		if err := pool.Ping(r.Context()); err != nil {
-			http.Error(w, "DB not healthy", http.StatusServiceUnavailable)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
-	})
-
-	// Здесь подключаете свои handlers
-	// r.Mount("/api/v1", yourRouter)
+	r.Post("/users", handler.HandleCreateUser)
 
 	// 5. Настраиваем и запускаем сервер
 	srv := &http.Server{
