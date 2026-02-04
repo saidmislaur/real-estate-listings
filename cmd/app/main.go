@@ -5,90 +5,46 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
-	"strconv"
-	"time"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
+	"go.uber.org/zap"
+
+	"Flatly/internal/user"
+	"Flatly/pkg/config"
+	httprouter "Flatly/pkg/httproute"
+	"Flatly/pkg/postgres"
 )
 
 func main() {
-	// 1. Загружаем .env (если файл существует)
-	_ = godotenv.Load() // не ошибка, если файла нет — значит переменные из окружения
+	_ = godotenv.Load()
 
-	// 2. Читаем настройки HTTP
-	host := getEnv("HTTP_HOST", "0.0.0.0")
-	port := getEnv("HTTP_PORT", "8082")
-	addr := fmt.Sprintf("%s:%s", host, port)
+	cfg := config.Load()
 
-	readTimeout, _ := time.ParseDuration(getEnv("HTTP_READ_TIMEOUT", "5s"))
-	writeTimeout, _ := time.ParseDuration(getEnv("HTTP_WRITE_TIMEOUT", "10s"))
-	idleTimeout, _ := time.ParseDuration(getEnv("HTTP_IDLE_TIMEOUT", "60s"))
+	logger, _ := zap.NewProduction()
+	defer logger.Sync()
 
-	// 3. Настраиваем пул PostgreSQL
-	pgConfig, err := pgxpool.ParseConfig(getEnv("POSTGRES_DSN", ""))
+	pool, err := postgres.NewPool(context.Background(), cfg.Postgres)
 	if err != nil {
-		log.Fatalf("Невалидный POSTGRES_DSN: %v", err)
-	}
-
-	maxConns, _ := strconv.Atoi(getEnv("POSTGRES_MAX_CONNS", "20"))
-	minConns, _ := strconv.Atoi(getEnv("POSTGRES_MIN_CONNS", "2"))
-	maxLifetime, _ := time.ParseDuration(getEnv("POSTGRES_MAX_CONN_LIFETIME", "1h"))
-	maxIdleTime, _ := time.ParseDuration(getEnv("POSTGRES_MAX_CONN_IDLE_TIME", "30m"))
-	healthPeriod, _ := time.ParseDuration(getEnv("POSTGRES_HEALTH_CHECK_PERIOD", "1m"))
-
-	pgConfig.MaxConns = int32(maxConns)
-	pgConfig.MinConns = int32(minConns)
-	pgConfig.MaxConnLifetime = maxLifetime
-	pgConfig.MaxConnIdleTime = maxIdleTime
-	pgConfig.HealthCheckPeriod = healthPeriod
-
-	pool, err := pgxpool.NewWithConfig(context.Background(), pgConfig)
-	if err != nil {
-		log.Fatalf("Не удалось подключиться к PostgreSQL: %v", err)
+		log.Fatalf("postgres init error: %v", err)
 	}
 	defer pool.Close()
 
-	log.Printf("PostgreSQL подключён (max: %d, min: %d)", pool.Config().MaxConns, pool.Config().MinConns)
+	repo := user.NewPgRepository(pool, logger)
+	service := user.NewService(repo, logger)
+	handler := user.NewHTTPHandler(service, logger)
 
-	// 4. Создаём роутер (пример с chi)
-	r := chi.NewRouter()
+	router := httprouter.NewRouter(handler, logger)
 
-	// Пример простого health-check
-	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-		if err := pool.Ping(r.Context()); err != nil {
-			http.Error(w, "DB not healthy", http.StatusServiceUnavailable)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
-	})
+	addr := fmt.Sprintf("%s:%s", cfg.HTTP.Host, cfg.HTTP.Port)
 
-	// Здесь подключаете свои handlers
-	// r.Mount("/api/v1", yourRouter)
-
-	// 5. Настраиваем и запускаем сервер
-	srv := &http.Server{
+	server := &http.Server{
 		Addr:         addr,
-		Handler:      r,
-		ReadTimeout:  readTimeout,
-		WriteTimeout: writeTimeout,
-		IdleTimeout:  idleTimeout,
+		Handler:      router,
+		ReadTimeout:  cfg.HTTP.ReadTimeout,
+		WriteTimeout: cfg.HTTP.WriteTimeout,
+		IdleTimeout:  cfg.HTTP.IdleTimeout,
 	}
 
-	log.Printf("Сервер запускается на http://%s", addr)
-
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("Ошибка запуска сервера: %v", err)
-	}
-}
-
-// Вспомогательная функция — безопасно читает переменную
-func getEnv(key, fallback string) string {
-	if value, exists := os.LookupEnv(key); exists {
-		return value
-	}
-	return fallback
+	log.Printf("Server started at http://%s", addr)
+	log.Fatal(server.ListenAndServe())
 }
