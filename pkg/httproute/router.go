@@ -14,6 +14,7 @@ func NewRouter(userHandler *user.HTTPHandler, logger *zap.Logger) http.Handler {
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Post("/users", userHandler.HandleCreateUser)
+		r.Post("/login", userHandler.HandleLoginUser)
 	})
 
 	return r

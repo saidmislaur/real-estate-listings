@@ -13,6 +13,7 @@ import (
 
 type Service interface {
 	CreateUser(ctx context.Context, req CreateUserRequest) (*User, error)
+	LoginUser(ctx context.Context, req LoginUserRequest) (*User, error)
 }
 
 type ValidationError struct {
@@ -106,6 +107,68 @@ func (s service) CreateUser(ctx context.Context, req CreateUserRequest) (*User, 
 	)
 
 	return u, nil
+}
+
+func (s service) LoginUser(ctx context.Context, req LoginUserRequest) (*User, error) {
+	reqID, _ := ctx.Value(requestIDKey{}).(string)
+
+	if strings.TrimSpace(req.Email) == "" {
+		return nil, ValidationError{Field: "email", Message: ErrRequiredEmail.Error()}
+	}
+	if strings.TrimSpace(req.Password) == "" {
+		return nil, ValidationError{Field: "password", Message: ErrRequiredPasswordHash.Error()}
+	}
+
+	loginReq := LoginUserRequest{
+		Email:    req.Email,
+		Password: req.Password,
+	}
+
+	storedHash, err := s.repo.GetPasswordHashByEmail(ctx, req.Email)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			s.logger.Warn("login attempt - credentials invalid",
+				zap.String("request_id", reqID),
+				zap.String("email", loginReq.Email),
+			)
+			return nil, ErrInvalidCredentials // ← никогда не говори "пользователь не найден"
+		}
+		s.logger.Error("cannot get password hash",
+			zap.String("request_id", reqID),
+			zap.String("email", loginReq.Email),
+			zap.Error(err),
+		)
+		return nil, fmt.Errorf("login failed: %w", err)
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(storedHash), []byte(loginReq.Password)); err != nil {
+		s.logger.Warn("login attempt - invalid password",
+			zap.String("request_id", reqID),
+			zap.String("email", loginReq.Email),
+		)
+		return nil, ErrInvalidCredentials
+	}
+
+	user, err := s.repo.GetUserByEmail(ctx, loginReq.Email)
+	if err != nil {
+		if errors.Is(err, ErrInvalidCredentials) {
+			s.logger.Warn("unsuccessful login attempt",
+				zap.String("id", reqID),
+				zap.String("email", loginReq.Email),
+				zap.Error(err),
+			)
+			return nil, ErrInvalidCredentials
+		}
+
+		s.logger.Error("login failed",
+			zap.String("id", reqID),
+			zap.String("email", loginReq.Email),
+			zap.Error(err),
+		)
+		return nil, fmt.Errorf("login operation failed: %w", err)
+	}
+
+	return user, nil
 }
 
 func isValidRole(r Role) bool {
