@@ -26,6 +26,11 @@ type PostgresConfig struct {
 type Config struct {
 	HTTP     HTTPConfig
 	Postgres PostgresConfig
+	Auth     AuthConfig
+}
+
+type AuthConfig struct {
+	TokenSecret string
 }
 
 func Load() *Config {
@@ -44,6 +49,9 @@ func Load() *Config {
 			MaxConnLifetime:   getDuration("POSTGRES_MAX_CONN_LIFETIME", "1h"),
 			MaxConnIdleTime:   getDuration("POSTGRES_MAX_CONN_IDLE_TIME", "30m"),
 			HealthCheckPeriod: getDuration("POSTGRES_HEALTH_CHECK_PERIOD", "1m"),
+		},
+		Auth: AuthConfig{
+			TokenSecret: getEnv("AUTH_TOKEN_SECRET", "dev-secret"),
 		},
 	}
 }
