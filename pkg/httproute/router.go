@@ -4,16 +4,27 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
-	"go.uber.org/zap"
 
-	"Flatly/internal/user"
+	"Flatly/internal/auth"
+	"Flatly/internal/flat"
+	"Flatly/internal/house"
 )
 
-func NewRouter(userHandler *user.HTTPHandler, logger *zap.Logger) http.Handler {
+func NewRouter(authHandler *auth.HTTPHandler, houseHandler *house.HTTPHandler, flatHandler *flat.HTTPHandler, authService *auth.Service) http.Handler {
 	r := chi.NewRouter()
 
-	r.Route("/api/v1", func(r chi.Router) {
-		r.Post("/users", userHandler.HandleCreateUser)
+	r.Post("/dummyLogin", authHandler.HandleDummyLogin)
+	r.Post("/register", authHandler.HandleRegister)
+	r.Post("/login", authHandler.HandleLogin)
+
+	r.Group(func(r chi.Router) {
+		r.Use(auth.Middleware(authService))
+
+		r.With(auth.RequireRole(auth.RoleModerator)).Post("/house/create", houseHandler.HandleCreate)
+		r.Post("/flat/create", flatHandler.HandleCreate)
+		r.With(auth.RequireRole(auth.RoleModerator)).Post("/flat/update", flatHandler.HandleUpdate)
+		r.Get("/house/{id}", houseHandler.HandleGetByID)
+		r.With(auth.RequireRole(auth.RoleClient)).Post("/house/{id}/subscribe", houseHandler.HandleSubscribe)
 	})
 
 	return r

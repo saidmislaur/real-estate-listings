@@ -1,0 +1,42 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: testavito
+      POSTGRES_USER: said
+      POSTGRES_PASSWORD: said12
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U said -d testavito"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  app:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      HTTP_HOST: 0.0.0.0
+      HTTP_PORT: 8082
+      HTTP_READ_TIMEOUT: 5s
+      HTTP_WRITE_TIMEOUT: 10s
+      HTTP_IDLE_TIMEOUT: 60s
+      POSTGRES_DSN: postgres://said:said12@postgres:5432/testavito?sslmode=disable
+      POSTGRES_MAX_CONNS: 20
+      POSTGRES_MIN_CONNS: 2
+      POSTGRES_MAX_CONN_LIFETIME: 1h
+      POSTGRES_MAX_CONN_IDLE_TIME: 30m
+      POSTGRES_HEALTH_CHECK_PERIOD: 1m
+      AUTH_TOKEN_SECRET: super-secret-key
+    ports:
+      - "8082:8082"
+
+volumes:
+  postgres_data:

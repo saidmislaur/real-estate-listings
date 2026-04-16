@@ -79,6 +79,47 @@ func (h *HTTPHandler) HandleCreateUser(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, resp)
 }
 
+func (h *HTTPHandler) HandleLoginUser(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	var req LoginUserRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeJSONDecodeError(w, err)
+		return
+	}
+
+	user, err := h.srv.LoginUser(ctx, LoginUserRequest{
+		Email:    req.Email,
+		Password: req.Password,
+	})
+	if err != nil {
+		var ve ValidationError
+		switch {
+		case errors.As(err, &ve):
+			writeValidationError(w, ve)
+
+		case errors.Is(err, ErrInvalidCredentials):
+			writeAPIError(w, http.StatusUnauthorized, "invalid_credentials", "Неверный email или пароль", nil)
+
+		default:
+			h.logger.Error("login handler error",
+				zap.Error(err),
+				zap.String("email", req.Email),
+			)
+			writeAPIError(w, http.StatusInternalServerError, "internal_error", "Внутренняя ошибка сервера", nil)
+		}
+		return
+	}
+
+	resp := LoginUserResponse{
+		ID:    user.ID,
+		Email: user.Email,
+		Role:  user.Role,
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
 func writeValidationError(w http.ResponseWriter, ve ValidationError) {
 	details := map[string]any{}
 	if ve.Field != "" {
